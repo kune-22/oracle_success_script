@@ -1,0 +1,31 @@
+# Local credentials (keep the public template)
+.env
+.env.*
+!.env.example
+.oci/
+*.pem
+*.key
+
+# Runtime state and diagnostics
+success.marker
+stop.marker
+retry-state.json
+retry-state.json.tmp
+retry.lock
+*.marker.tmp
+*.log
+*.log.tmp
+backups/
+
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
