@@ -1,0 +1,99 @@
+name: OCI capacity retry
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17,47 * * * *"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: oci-capacity-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      OCI_STACK_ID: ${{ secrets.OCI_STACK_ID }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      MAIL_FROM: ${{ secrets.MAIL_FROM }}
+      MAIL_TO: ${{ secrets.MAIL_TO }}
+      MAIL_SUBJECT: ${{ secrets.MAIL_SUBJECT }}
+      OCI_POLL_SECONDS: "30"
+      OCI_POLL_TIMEOUT_SECONDS: "1500"
+      OCI_CLI_TIMEOUT_SECONDS: "120"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Python and OCI CLI
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install OCI CLI
+        run: python -m pip install --disable-pip-version-check --no-input oci-cli
+      - name: Configure OCI CLI
+        shell: bash
+        env:
+          OCI_TENANCY: ${{ secrets.OCI_TENANCY }}
+          OCI_USER: ${{ secrets.OCI_USER }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_PRIVATE_KEY_PASSPHRASE: ${{ secrets.OCI_PRIVATE_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$HOME/.oci"
+          umask 077
+          printf '%s\n' "$OCI_PRIVATE_KEY" > "$HOME/.oci/oci_api_key.pem"
+          {
+            printf '%s\n' '[DEFAULT]'
+            printf 'user=%s\n' "$OCI_USER"
+            printf 'fingerprint=%s\n' "$OCI_FINGERPRINT"
+            printf 'tenancy=%s\n' "$OCI_TENANCY"
+            printf 'region=%s\n' "$OCI_REGION"
+            printf 'key_file=%s\n' "$HOME/.oci/oci_api_key.pem"
+            if [[ -n "${OCI_PRIVATE_KEY_PASSPHRASE:-}" ]]; then
+              printf 'pass_phrase=%s\n' "$OCI_PRIVATE_KEY_PASSPHRASE"
+            fi
+          } > "$HOME/.oci/config"
+          chmod 600 "$HOME/.oci/config" "$HOME/.oci/oci_api_key.pem"
+          oci --version
+      - name: Restore state from the latest run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=oci-retry-state&per_page=1" --jq '.artifacts[0].archive_download_url // empty')"
+          if [[ -n "$url" ]]; then
+            curl --fail --silent --show-error --location \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "$url" --output state.zip
+            unzip -o state.zip -d .
+          fi
+      - name: Run retry script
+        run: python oci_retry_notify.py
+      - name: Save state for the next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-retry-state
+          path: |
+            retry-state.json
+            success.marker
+            stop.marker
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Disable this workflow after success
+        if: success() && hashFiles('success.marker') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/oci-retry.yml/disable"

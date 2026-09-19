@@ -2,15 +2,36 @@
 
 Windowsタスクスケジューラから1回ずつ実行し、Resource Managerスタックを適用します。`Out of host capacity` で失敗した場合だけ、次回のスケジュールで新しい適用を試みます。常駐ループではありません。
 
-## GitHubへの登録
+## GitHub Actions
 
-登録対象は `oci_retry_notify.py`、`test_oci_retry_notify.py`、`README.md`、`.env.example`、`.gitignore` です。
+`.github/workflows/oci-retry.yml` がActions用のworkflowです。`workflow_dispatch`で手動起動でき、定期実行はUTCの17分・47分です。成功すると`success.marker`を保存し、このworkflow自身を無効化します。容量不足の場合だけ次回の定期実行へ進みます。GitHub Actionsのスケジュールは混雑時に遅れることがあります。
 
-**GitHub Actionsのワークフローはまだ未実装です。リポジトリへ登録しただけでは定期実行されません。** Actions対応には、実行ごとにジョブID・成功状態を引き継ぐ仕組みと、成功通知後に定期実行を無効化する処理の追加が必要です。
+### Secrets
 
-`.env`、OCI秘密鍵、ログ、マーカー、`retry-state.json`はGitに追加しません。`.gitignore`で除外しています。ブラウザーでファイルをアップロードする場合も、これらを選択しないでください。認証情報はActions対応時にGitHub Secretsへ登録します。
+リポジトリの `Settings` → `Secrets and variables` → `Actions` → `New repository secret` から登録します。値はSecretsの入力欄に貼り付け、READMEやIssueには書きません。
 
-手元の`.env`と実行状態は保持しています。公開用の整理のために状態ファイルを削除すると、成功済み・実行中のジョブを見失う可能性があります。
+| Secret名 | 入れる値 | 確認場所 |
+| --- | --- | --- |
+| `OCI_STACK_ID` | Resource ManagerスタックのOCID (`ocid1.ormstack...`) | OCIコンソール → Developer Services → Resource Manager → Stacks → 対象スタック |
+| `OCI_TENANCY` | テナンシーOCID (`ocid1.tenancy...`) | OCIコンソール右上のプロフィール → Tenancy → OCID |
+| `OCI_USER` | APIを実行するユーザーのOCID (`ocid1.user...`) | Identity & Security → Users → 対象ユーザー → OCID |
+| `OCI_FINGERPRINT` | APIキーのフィンガープリント | 対象ユーザー → API keys → 登録済みキー |
+| `OCI_REGION` | リージョン識別子（例 `ap-tokyo-1`） | OCIコンソールのリージョン選択、または`.oci/config` |
+| `OCI_PRIVATE_KEY` | OCI APIキーの秘密鍵PEM全文 | `oci setup config`で生成した秘密鍵ファイル |
+| `OCI_PRIVATE_KEY_PASSPHRASE` | 秘密鍵を暗号化した場合のパスフレーズ。暗号化していなければ空欄 | 秘密鍵作成時に設定した値 |
+| `SMTP_HOST` | SMTPサーバー名。Gmailなら `smtp.gmail.com` | メールサービスの仕様 |
+| `SMTP_PORT` | SMTPポート。通常 `587` | メールサービスの仕様 |
+| `SMTP_USER` | SMTPログインユーザー | メールサービスの仕様 |
+| `SMTP_PASSWORD` | SMTPパスワード。Gmailはアプリパスワード | メールサービスの仕様 |
+| `MAIL_FROM` | 送信元メールアドレス | SMTPアカウント |
+| `MAIL_TO` | 成功通知の宛先 | 通知を受けたいアドレス |
+| `MAIL_SUBJECT` | 任意。省略時は `OCIインスタンス作成成功` | 任意 |
+
+`OCI_PRIVATE_KEY`には公開鍵ではなく秘密鍵を入れます。OCIのAPIキーは、ユーザーのAPI Keys画面に公開鍵を登録し、その対になる秘密鍵をSecretへ登録してください。[Oracleの設定仕様](https://docs.oracle.com/en-us/iaas/Content/API/Concepts/sdkconfig.htm)
+
+### 初回起動
+
+Secrets登録後、GitHubの `Actions` → `OCI capacity retry` → `Run workflow` → `Run workflow` の順に押します。`Configure OCI CLI`と`Run retry script`が成功し、OCI Resource ManagerにApply Jobが作成されれば起動成功です。成功後はworkflowが自動的に無効化されます。
 
 ## 準備と実行
 
@@ -20,7 +41,7 @@ Windowsタスクスケジューラから1回ずつ実行し、Resource Manager�
 4. Gmailではアプリパスワードを設定します。SMTPは証明書検証付きSTARTTLSを使用します。
 
 ```powershell
-cd C:\path\to\oracle_success_script
+cd C:\Users\Norar\Documents\Codex\oracle_success_script
 python .\oci_retry_notify.py
 ```
 
@@ -33,8 +54,8 @@ python .\oci_retry_notify.py
 例として08:00、13:00、22:00のトリガーを設定します。
 
 - プログラム: インストール済みPython実行ファイルの絶対パス
-- 引数: `"C:\path\to\oracle_success_script\oci_retry_notify.py"`
-- 開始場所: `C:\path\to\oracle_success_script`
+- 引数: `"C:\Users\Norar\Documents\Codex\oracle_success_script\oci_retry_notify.py"`
+- 開始場所: `C:\Users\Norar\Documents\Codex\oracle_success_script`
 - 「タスクが既に実行中の場合」は「新しいインスタンスを開始しない」
 - 実行時間制限は監視時間（既定30分）とCLI処理時間に余裕を加えた値にする
 
