@@ -3,6 +3,7 @@ name: OCI capacity retry
 on:
   workflow_dispatch:
   schedule:
+    # Scheduled retries: every hour at :17 and :47 (UTC).
     - cron: "17,47 * * * *"
 
 permissions:
